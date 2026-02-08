@@ -1,0 +1,198 @@
+# name: test/sql/oast.test
+# description: test oast extension
+# group: [oast]
+
+# Require statement will ensure the extension is loaded from now on
+require oast
+
+# Test oast_validate with valid subdomain
+query I
+SELECT oast_validate('c58bduhe008dovpvhvugcfemp9yyyyyyn')
+----
+false
+
+# Test oast_validate with valid FQDN
+query I
+SELECT oast_validate('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro')
+----
+true
+
+# Test oast_validate with invalid input
+query I
+SELECT oast_validate('not-an-oast-domain.example.com')
+----
+false
+
+# Test oast_validate with NULL
+query I
+SELECT oast_validate(NULL)
+----
+NULL
+
+# Test oast_decode_json with valid FQDN
+query I
+SELECT json_extract_string(oast_decode_json('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro'), '$.ksort')
+----
+c58bdu
+
+# Test oast_decode_json with NULL
+query I
+SELECT oast_decode_json(NULL)
+----
+NULL
+
+# Test oast_extract with text containing OAST domain
+query I
+SELECT oast_extract('some text c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro more text')
+----
+["c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro"]
+
+# Test oast_extract with no OAST domains
+query I
+SELECT oast_extract('no oast domains here')
+----
+[]
+
+# Test oast_extract with NULL
+query I
+SELECT oast_extract(NULL)
+----
+NULL
+
+# Test oast_extract_decode with text containing OAST domain
+query I
+SELECT json_array_length(oast_extract_decode('some text c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro more text'))
+----
+1
+
+# Test oast_extract_decode with no OAST domains
+query I
+SELECT json_array_length(oast_extract_decode('no oast domains here'))
+----
+0
+
+# ===== SQL Macro Tests =====
+
+# ============================================
+# Struct macro tests
+# ============================================
+
+# oast_struct returns correct type
+query I
+SELECT typeof(oast_struct('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro'))
+----
+STRUCT(original VARCHAR, "valid" BOOLEAN, ts BIGINT, machine_id VARCHAR, pid INTEGER, counter INTEGER, ksort VARCHAR, campaign VARCHAR, nonce VARCHAR)
+
+# oast_struct field access
+query I
+SELECT oast_struct('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro').campaign
+----
+he008
+
+query I
+SELECT oast_struct('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro').ksort
+----
+c58bdu
+
+# oast_struct NULL propagation
+query I
+SELECT oast_struct(NULL)
+----
+NULL
+
+# oast_summary returns compact struct
+query I
+SELECT typeof(oast_summary('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro'))
+----
+STRUCT(ksort VARCHAR, campaign VARCHAR, machine_id VARCHAR, ts BIGINT)
+
+# oast_summary field access
+query I
+SELECT oast_summary('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro').ksort
+----
+c58bdu
+
+# ============================================
+# Field accessor macro tests
+# ============================================
+
+# oast_timestamp returns a TIMESTAMP WITH TIME ZONE
+query I
+SELECT typeof(oast_timestamp('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro'))
+----
+TIMESTAMP WITH TIME ZONE
+
+# oast_campaign extracts correctly
+query I
+SELECT oast_campaign('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro')
+----
+he008
+
+# oast_ksort extracts correctly
+query I
+SELECT oast_ksort('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro')
+----
+c58bdu
+
+# oast_machine_id extracts correctly
+query I
+SELECT oast_machine_id('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro')
+----
+2e:00:10
+
+# NULL propagation on all accessors
+query I
+SELECT oast_timestamp(NULL)
+----
+NULL
+
+query I
+SELECT oast_campaign(NULL)
+----
+NULL
+
+# ============================================
+# Extraction helper macro tests
+# ============================================
+
+# oast_count with OAST domains present
+query I
+SELECT oast_count('text c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro more text')
+----
+1
+
+# oast_count with no OAST domains
+query I
+SELECT oast_count('no oast domains here')
+----
+0
+
+# oast_has_oast positive
+query I
+SELECT oast_has_oast('text c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro more')
+----
+true
+
+# oast_has_oast negative
+query I
+SELECT oast_has_oast('nothing here')
+----
+false
+
+# oast_count NULL
+query I
+SELECT oast_count(NULL)
+----
+NULL
+
+# oast_extract_structs returns a list
+query I
+SELECT len(oast_extract_structs('text c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro more'))
+----
+1
+
+# oast_extract_structs list element has correct type
+query I
+SELECT typeof(oast_extract_structs('text c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro more')[1])
+----
+STRUCT(original VARCHAR, "valid" BOOLEAN, ts BIGINT, machine_id VARCHAR, pid INTEGER, counter INTEGER, ksort VARCHAR, campaign VARCHAR, nonce VARCHAR)

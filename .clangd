@@ -1,0 +1,4 @@
+CompileFlags:
+  Add:
+    - "-Iduckdb_capi"
+    - "-Isrc/include"
