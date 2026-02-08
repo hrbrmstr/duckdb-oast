@@ -34,7 +34,6 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 # Create Extension library
 set(EXTENSION_SOURCES
-        src/add_numbers.c
         src/oast_extension.c
         src/oast_base32.c
         src/oast_domains.c

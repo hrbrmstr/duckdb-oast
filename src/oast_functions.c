@@ -24,22 +24,18 @@ static void OASTValidateFunction(duckdb_function_info info,
   // Get output data pointer (BOOLEAN)
   bool *output_data = (bool *)duckdb_vector_get_data(output);
 
-  // Handle potential NULL inputs
   if (input_validity) {
     duckdb_vector_ensure_validity_writable(output);
     uint64_t *output_validity = duckdb_vector_get_validity(output);
 
     for (idx_t row = 0; row < count; row++) {
       if (duckdb_validity_row_is_valid(input_validity, row)) {
-        // Get VARCHAR data
         duckdb_string_t str = input_data[row];
         const char *str_data = duckdb_string_t_data(&str);
         size_t str_len = duckdb_string_t_length(str);
 
-        // Validate
         output_data[row] = oast_validate(str_data, str_len);
       } else {
-        // NULL input -> NULL output
         duckdb_validity_set_row_invalid(output_validity, row);
       }
     }
@@ -74,12 +70,10 @@ static void OASTDecodeJSONFunction(duckdb_function_info info,
 
     for (idx_t row = 0; row < count; row++) {
       if (duckdb_validity_row_is_valid(input_validity, row)) {
-        // Get VARCHAR data
         duckdb_string_t str = input_data[row];
         const char *str_data = duckdb_string_t_data(&str);
         size_t str_len = duckdb_string_t_length(str);
 
-        // Decode
         oast_decoded_t result;
         oast_decode(str_data, str_len, &result);
 
@@ -94,7 +88,6 @@ static void OASTDecodeJSONFunction(duckdb_function_info info,
                  result.machine_id[2], result.pid, result.counter, result.ksort,
                  result.campaign, result.nonce);
 
-        // Add error if present
         if (!result.valid && result.error[0]) {
           size_t len = strlen(json);
           snprintf(json + len, sizeof(json) - len, ",\"error\":\"%s\"}",
@@ -103,11 +96,9 @@ static void OASTDecodeJSONFunction(duckdb_function_info info,
           strcat(json, "}");
         }
 
-        // Assign to output
         duckdb_vector_assign_string_element_len(output, row, json,
                                                 strlen(json));
       } else {
-        // NULL input -> NULL output
         duckdb_validity_set_row_invalid(output_validity, row);
       }
     }

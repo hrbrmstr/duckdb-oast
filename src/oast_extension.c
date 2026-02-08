@@ -1,6 +1,5 @@
 #include "duckdb_extension.h"
 
-#include "add_numbers.h"
 #include "oast_functions.h"
 #include "oast_macros.h"
 
@@ -33,8 +32,6 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
                             struct duckdb_extension_access *access) {
   char err[512];
 
-  // Register demo function
-  RegisterAddNumbersFunction(connection);
 
   // Register OAST scalar functions (must be registered before macros)
   RegisterOASTFunctions(connection);
