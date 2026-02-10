@@ -62,7 +62,15 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
       !register_macro(connection, OAST_HAS_OAST_MACRO, "oast_has_oast", err,
                       sizeof(err)) ||
       !register_macro(connection, OAST_EXTRACT_STRUCTS_MACRO,
-                      "oast_extract_structs", err, sizeof(err))) {
+                      "oast_extract_structs", err, sizeof(err)) ||
+      !register_macro(connection, OAST_FIRST_MACRO, "oast_first", err,
+                      sizeof(err)) ||
+
+      // Table macros (ergonomic SELECT * access)
+      !register_macro(connection, OAST_DECODE_TBL_MACRO, "oast_decode_tbl",
+                      err, sizeof(err)) ||
+      !register_macro(connection, OAST_EXTRACT_TBL_MACRO, "oast_extract_tbl",
+                      err, sizeof(err))) {
     access->set_error(info, err);
     return false;
   }

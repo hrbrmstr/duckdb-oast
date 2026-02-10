@@ -196,3 +196,85 @@ query I
 SELECT typeof(oast_extract_structs('text c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro more')[1])
 ----
 STRUCT(original VARCHAR, "valid" BOOLEAN, ts BIGINT, machine_id VARCHAR, pid INTEGER, counter INTEGER, ksort VARCHAR, campaign VARCHAR, nonce VARCHAR)
+
+# ============================================
+# oast_first macro tests
+# ============================================
+
+# oast_first returns correct struct type
+query I
+SELECT typeof(oast_first('text c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro more'))
+----
+STRUCT(original VARCHAR, "valid" BOOLEAN, ts BIGINT, machine_id VARCHAR, pid INTEGER, counter INTEGER, ksort VARCHAR, campaign VARCHAR, nonce VARCHAR)
+
+# oast_first field access
+query I
+SELECT oast_first('text c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro more').campaign
+----
+he008
+
+query I
+SELECT oast_first('text c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro more').ksort
+----
+c58bdu
+
+# oast_first returns NULL when no OAST domains
+query I
+SELECT oast_first('no oast domains here')
+----
+NULL
+
+# oast_first NULL propagation
+query I
+SELECT oast_first(NULL)
+----
+NULL
+
+# oast_first picks the first domain when multiple present
+query I
+SELECT oast_first('first c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro second c5aov2fh0s0006ocs40gcfemp9yyyyyyn.oast.fun').original
+----
+c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro
+
+# ============================================
+# Table macro tests
+# ============================================
+
+# oast_decode_tbl returns correct columns including timestamp
+query I
+SELECT campaign FROM oast_decode_tbl('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro')
+----
+he008
+
+query I
+SELECT ksort FROM oast_decode_tbl('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro')
+----
+c58bdu
+
+query I
+SELECT typeof(timestamp) FROM oast_decode_tbl('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro')
+----
+TIMESTAMP WITH TIME ZONE
+
+# oast_decode_tbl preserves all original fields
+query I
+SELECT machine_id FROM oast_decode_tbl('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro')
+----
+2e:00:10
+
+# oast_extract_tbl returns correct columns for text extraction
+query I
+SELECT campaign FROM oast_extract_tbl('text c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro more')
+----
+he008
+
+query I
+SELECT typeof(timestamp) FROM oast_extract_tbl('text c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro more')
+----
+TIMESTAMP WITH TIME ZONE
+
+# oast_extract_tbl returns multiple rows for multiple domains
+query I
+SELECT count(*) FROM oast_extract_tbl('first c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro second c5aov2fh0s0006ocs40gcfemp9yyyyyyn.oast.fun')
+----
+2

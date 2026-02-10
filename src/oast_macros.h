@@ -79,4 +79,58 @@
     "  }]'" \
     ")"
 
+// Table macros (ergonomic SELECT * without unnest gymnastics)
+
+#define OAST_DECODE_TBL_MACRO \
+    "CREATE OR REPLACE MACRO oast_decode_tbl(domain) AS TABLE " \
+    "SELECT *, to_timestamp(ts) AS timestamp " \
+    "FROM (SELECT unnest(json_transform(" \
+    "oast_decode_json(domain), " \
+    "'{" \
+    "\"original\": \"VARCHAR\", " \
+    "\"valid\": \"BOOLEAN\", " \
+    "\"ts\": \"BIGINT\", " \
+    "\"machine_id\": \"VARCHAR\", " \
+    "\"pid\": \"INTEGER\", " \
+    "\"counter\": \"INTEGER\", " \
+    "\"ksort\": \"VARCHAR\", " \
+    "\"campaign\": \"VARCHAR\", " \
+    "\"nonce\": \"VARCHAR\"" \
+    "}')))"
+
+#define OAST_EXTRACT_TBL_MACRO \
+    "CREATE OR REPLACE MACRO oast_extract_tbl(text) AS TABLE " \
+    "SELECT *, to_timestamp(ts) AS timestamp " \
+    "FROM (SELECT unnest(json_transform(" \
+    "oast_extract_decode(text), " \
+    "'[{" \
+    "\"original\": \"VARCHAR\", " \
+    "\"valid\": \"BOOLEAN\", " \
+    "\"ts\": \"BIGINT\", " \
+    "\"machine_id\": \"VARCHAR\", " \
+    "\"pid\": \"INTEGER\", " \
+    "\"counter\": \"INTEGER\", " \
+    "\"ksort\": \"VARCHAR\", " \
+    "\"campaign\": \"VARCHAR\", " \
+    "\"nonce\": \"VARCHAR\"" \
+    "}]'), recursive := true))"
+
+// Scalar convenience macro: first OAST domain from text as a struct
+
+#define OAST_FIRST_MACRO \
+    "CREATE OR REPLACE MACRO oast_first(text) AS " \
+    "json_transform(" \
+    "json_extract(oast_extract_decode(text), '$[0]'), " \
+    "'{" \
+    "\"original\": \"VARCHAR\", " \
+    "\"valid\": \"BOOLEAN\", " \
+    "\"ts\": \"BIGINT\", " \
+    "\"machine_id\": \"VARCHAR\", " \
+    "\"pid\": \"INTEGER\", " \
+    "\"counter\": \"INTEGER\", " \
+    "\"ksort\": \"VARCHAR\", " \
+    "\"campaign\": \"VARCHAR\", " \
+    "\"nonce\": \"VARCHAR\"" \
+    "}')"
+
 #endif // OAST_MACROS_H

@@ -27,6 +27,11 @@ Extraction Helpers:
 - `oast_count(text)` - Count OAST domains in text (BIGINT)
 - `oast_has_oast(text)` - Check if text contains OAST domains (BOOLEAN)
 - `oast_extract_structs(text)` - Extract and decode all domains to LIST(STRUCT)
+- `oast_first(text)` - Extract and decode first OAST domain from text (STRUCT)
+
+Table Macros (use with `SELECT * FROM`):
+- `oast_decode_tbl(domain)` - Decode a domain into a row with all fields + timestamp
+- `oast_extract_tbl(text)` - Extract and decode all domains from text into rows
 
 Supports OAST domains from: oast.pro, oast.live, oast.site, oast.online, oast.fun, oast.me, interact.sh, interactsh.com. (More planned.)
 
@@ -68,21 +73,28 @@ SELECT oast_validate('invalid-domain.com');
 
 ### Decode OAST Metadata
 
-Option 1: STRUCT output (recommended for most cases)
+Option 1: Table macro (recommended -- use with `SELECT *` or LATERAL joins)
 
 ```sql
--- Decode to native STRUCT (ergonomic field access)
-SELECT oast_struct('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro');
+-- All decoded fields as columns, including a proper TIMESTAMP
+SELECT * FROM oast_decode_tbl('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro');
 
--- Access fields with dot notation
+-- Join decoded fields alongside existing table columns
+SELECT t.client_ip, d.campaign, d.ksort, d.timestamp
+FROM sensor_logs t, LATERAL oast_decode_tbl(t.domain) d;
+```
+
+Option 2: STRUCT output (for expressions and filters)
+
+```sql
+-- Access individual fields with dot notation
 SELECT
     oast_struct(domain).ksort,
-    oast_struct(domain).campaign,
-    oast_struct(domain).timestamp
+    oast_struct(domain).campaign
 FROM sensor_logs;
 
--- Star expansion
-SELECT oast_struct(domain).* FROM sensor_logs;
+-- All fields via unnest
+SELECT unnest(oast_struct(domain)) FROM sensor_logs;
 ```
 
 Option 2: JSON output (for compatibility)
@@ -116,12 +128,12 @@ FROM sensor_logs;
 ```sql
 -- Count OAST domains in log files (fast)
 SELECT line, oast_count(line) as num_domains
-FROM read_csv_auto('logs/access.log', header=false, columns={'line': 'VARCHAR'})
+FROM read_csv('logs/access.log', header=false, columns={'line': 'VARCHAR'})
 WHERE oast_count(line) > 0;
 
 -- Extract domains (returns JSON array)
 SELECT oast_extract(line) as domains
-FROM read_csv_auto('logs/access.log', header=false, columns={'line': 'VARCHAR'})
+FROM read_csv('logs/access.log', header=false, columns={'line': 'VARCHAR'})
 WHERE oast_count(line) > 0;
 
 -- Returns: ["c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro"]
@@ -130,7 +142,14 @@ WHERE oast_count(line) > 0;
 ### Extract and Decode in One Call
 
 ```sql
--- Extract and decode all OAST domains from text
+-- Table macro: decoded domains as rows with proper columns
+SELECT * FROM oast_extract_tbl('Log entry with c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro and c5aov2fh0s0006ocs40gcfemp9yyyyyyn.oast.fun');
+
+-- First domain only (common single-domain-per-line case)
+SELECT oast_first('Log entry with c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro').campaign;
+-- Returns: he008
+
+-- JSON output (for compatibility)
 SELECT oast_extract_decode('Log entry with c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro and c5aov2fh0s0006ocs40gcfemp9yyyyyyn.oast.fun');
 -- Returns JSON array with decoded metadata for both domains
 ```
@@ -153,10 +172,15 @@ WHERE oast_timestamp(domain) > '2025-01-01'::TIMESTAMP;
 
 ### Multiple fields from the same domain
 
-Use `oast_struct()` and subquery or alias to avoid repeated JSON parsing.
+Use the table macro for the cleanest syntax. Falls back to `oast_struct()` subquery if needed.
 
 ```sql
--- Good: parses once
+-- Best: table macro with LATERAL join (parses once, clean column access)
+SELECT t.*, d.campaign, d.ksort, d.machine_id
+FROM sessions t, LATERAL oast_decode_tbl(t.domain) d
+WHERE d.valid;
+
+-- Alternative: struct subquery (parses once)
 SELECT d.campaign, d.ksort, d.machine_id
 FROM (SELECT oast_struct(domain) AS d FROM sessions WHERE oast_validate(domain));
 
@@ -167,22 +191,34 @@ FROM sessions WHERE oast_validate(domain);
 
 ### All fields
 
-Use `oast_struct()` with star expansion or `oast_summary()` for just the key fields.
+Use the table macro for `SELECT *`, or `unnest()` with struct macros.
 
 ```sql
--- All fields
-SELECT oast_struct(domain).* FROM sessions WHERE oast_validate(domain);
+-- Table macro (includes proper timestamp column)
+SELECT * FROM sessions t, LATERAL oast_decode_tbl(t.domain) d WHERE d.valid;
+
+-- Struct macro + unnest
+SELECT unnest(oast_struct(domain)) FROM sessions WHERE oast_validate(domain);
 
 -- Just the commonly used fields
-SELECT oast_summary(domain).* FROM sessions WHERE oast_validate(domain);
+SELECT unnest(oast_summary(domain)) FROM sessions WHERE oast_validate(domain);
 ```
 
 ### Extracting from text
 
-Use `oast_extract_structs()` for the full pipeline from raw text to decoded struct rows.
+Use `oast_extract_tbl()` for the full pipeline from raw text to decoded rows.
 
 ```sql
-SELECT unnest(oast_extract_structs(payload)).*
+-- Table macro: each domain becomes a row with typed columns
+SELECT t.line, d.campaign, d.timestamp
+FROM raw_logs t, LATERAL oast_extract_tbl(t.payload) d;
+
+-- Single domain per line (common case)
+SELECT oast_first(payload).campaign
+FROM raw_logs WHERE oast_has_oast(payload);
+
+-- Struct list approach (when you need the list itself)
+SELECT unnest(oast_extract_structs(payload), recursive := true)
 FROM raw_logs WHERE oast_has_oast(payload);
 ```
 
@@ -193,66 +229,66 @@ FROM raw_logs WHERE oast_has_oast(payload);
 ```sql
 -- Load sensor session data
 CREATE TABLE sensor_sessions AS
-SELECT * FROM read_csv_auto('sensor_data.csv');
+SELECT * FROM read_csv('sensor_data.csv');
 
--- Find all valid OAST callbacks (efficient with struct)
+-- Find all valid OAST callbacks with decoded metadata
 SELECT
-    timestamp,
-    client_ip,
-    domain,
-    oast_campaign(domain) as campaign
-FROM sensor_sessions
-WHERE oast_validate(domain)
-ORDER BY timestamp DESC;
+    t.timestamp as log_ts,
+    t.client_ip,
+    t.domain,
+    d.campaign,
+    d.timestamp as oast_ts
+FROM sensor_sessions t, LATERAL oast_decode_tbl(t.domain) d
+WHERE d.valid
+ORDER BY t.timestamp DESC;
 ```
 
 ### Time-Based Analysis
 
 ```sql
--- Correlate OAST callbacks by timestamp (efficient with accessor)
+-- Correlate OAST callbacks by timestamp
 SELECT
-    date_trunc('hour', oast_timestamp(domain)) as hour,
+    date_trunc('hour', d.timestamp) as hour,
     count(*) as callback_count,
-    oast_campaign(domain) as campaign
-FROM sensor_sessions
-WHERE oast_validate(domain)
-GROUP BY hour, campaign
+    d.campaign
+FROM sensor_sessions t, LATERAL oast_decode_tbl(t.domain) d
+WHERE d.valid
+GROUP BY hour, d.campaign
 ORDER BY hour DESC;
 ```
 
 ### K-Sort Deduplication
 
 ```sql
--- Deduplicate callbacks using K-sort identifier (efficient with summary)
-WITH decoded AS (
-    SELECT oast_summary(domain).* FROM sensor_sessions WHERE oast_validate(domain)
-)
-SELECT DISTINCT
-    ksort,
-    campaign,
-    min(ts) as first_seen,
-    max(ts) as last_seen,
+-- Deduplicate callbacks using K-sort identifier
+SELECT
+    d.ksort,
+    d.campaign,
+    min(d.timestamp) as first_seen,
+    max(d.timestamp) as last_seen,
     count(*) as total_hits
-FROM decoded
-GROUP BY ksort, campaign;
+FROM sensor_sessions t, LATERAL oast_decode_tbl(t.domain) d
+WHERE d.valid
+GROUP BY d.ksort, d.campaign;
 ```
 
 ### Extract from Arbitrary Logs
 
 ```sql
--- Scan web server logs for embedded OAST domains
-SELECT
-    line,
-    oast_extract(line) as found_domains
-FROM read_csv_auto('logs/access.log', header=false, columns={'line': 'VARCHAR'})
-WHERE oast_extract(line) != '[]';
+-- Scan web server logs: extract and decode all OAST domains as rows
+SELECT t.line, d.campaign, d.ksort, d.timestamp
+FROM read_csv('logs/access.log', header=false, columns={'line': 'VARCHAR'}) t,
+     LATERAL oast_extract_tbl(t.line) d;
 
--- Decode all found domains
-SELECT
-    line,
-    oast_extract_decode(line) as decoded
-FROM read_csv_auto('logs/access.log', header=false, columns={'line': 'VARCHAR'})
-WHERE oast_extract(line) != '[]';
+-- Quick scan: first domain per line only
+SELECT line, oast_first(line).campaign as campaign
+FROM read_csv('logs/access.log', header=false, columns={'line': 'VARCHAR'})
+WHERE oast_has_oast(line);
+
+-- JSON output (for raw domain lists)
+SELECT line, oast_extract(line) as found_domains
+FROM read_csv('logs/access.log', header=false, columns={'line': 'VARCHAR'})
+WHERE oast_has_oast(line);
 ```
 
 ## Function Reference
@@ -283,8 +319,8 @@ Example:
 -- Field access
 SELECT oast_struct(domain).ksort, oast_struct(domain).ts FROM logs;
 
--- Star expansion
-SELECT oast_struct(domain).* FROM logs;
+-- Star expansion via unnest
+SELECT unnest(oast_struct(domain)) FROM logs;
 ```
 
 #### `oast_summary(domain VARCHAR) -> STRUCT`
@@ -301,7 +337,7 @@ Returns compact STRUCT with just the commonly used fields. Parses JSON once.
 
 Example:
 ```sql
-SELECT oast_summary(domain).* FROM logs WHERE oast_validate(domain);
+SELECT unnest(oast_summary(domain)) FROM logs WHERE oast_validate(domain);
 ```
 
 #### Field Accessor Macros (single-field convenience)
@@ -370,7 +406,7 @@ Quick predicate for filtering rows that contain OAST domains. Equivalent to `oas
 
 Example:
 ```sql
-SELECT line FROM read_csv_auto('access.log', header=false, columns={'line':'VARCHAR'})
+SELECT line FROM read_csv('access.log', header=false, columns={'line':'VARCHAR'})
 WHERE oast_has_oast(line);
 ```
 
@@ -385,10 +421,66 @@ Extract all OAST domains from text, decode each, return as list of structs. Full
 Example:
 ```sql
 -- Extract, decode, and flatten to rows
-SELECT unnest(oast_extract_structs(payload)).* FROM raw_logs WHERE oast_has_oast(payload);
+SELECT unnest(oast_extract_structs(payload), recursive := true) FROM raw_logs WHERE oast_has_oast(payload);
 
 -- Access specific fields
-SELECT unnest(oast_extract_structs(payload)).campaign FROM raw_logs;
+SELECT s.campaign FROM (SELECT unnest(oast_extract_structs(payload)) AS s FROM raw_logs);
+```
+
+#### `oast_first(text VARCHAR) -> STRUCT`
+
+Extract and decode the first OAST domain found in text. Returns a single STRUCT (not a list). Convenient for the common one-domain-per-line pattern.
+
+- Input: Text to search
+- Returns: STRUCT with same fields as `oast_struct()`, or NULL if no OAST domains found
+- NULL handling: Returns NULL for NULL input
+
+Example:
+```sql
+-- Single-field access on first domain
+SELECT oast_first(line).campaign
+FROM read_csv('access.log', header=false, columns={'line':'VARCHAR'})
+WHERE oast_has_oast(line);
+```
+
+#### Table Macros
+
+Table macros return result sets and are used in `FROM` clauses. They support `SELECT *` and LATERAL joins naturally.
+
+#### `oast_decode_tbl(domain VARCHAR) -> TABLE`
+
+Decodes an OAST domain into a single-row table with all fields plus a proper `timestamp` column (TIMESTAMP WITH TIME ZONE).
+
+- Input: OAST domain (subdomain or FQDN)
+- Returns: Row with fields: `original`, `valid`, `ts`, `machine_id`, `pid`, `counter`, `ksort`, `campaign`, `nonce`, `timestamp`
+
+Example:
+```sql
+-- Standalone
+SELECT * FROM oast_decode_tbl('c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro');
+
+-- LATERAL join with existing table
+SELECT t.client_ip, d.campaign, d.timestamp
+FROM sensor_logs t, LATERAL oast_decode_tbl(t.domain) d
+WHERE d.valid;
+```
+
+#### `oast_extract_tbl(text VARCHAR) -> TABLE`
+
+Extracts all OAST domains from text, decodes each, and returns one row per domain with all fields plus a proper `timestamp` column.
+
+- Input: Text to search
+- Returns: One row per domain found, with fields: `original`, `valid`, `ts`, `machine_id`, `pid`, `counter`, `ksort`, `campaign`, `nonce`, `timestamp`
+
+Example:
+```sql
+-- Standalone
+SELECT * FROM oast_extract_tbl('log with c58bduhe008dovpvhvugcfemp9yyyyyyn.oast.pro embedded');
+
+-- LATERAL join for log scanning
+SELECT t.line, d.campaign, d.timestamp
+FROM read_csv('access.log', header=false, columns={'line':'VARCHAR'}) t,
+     LATERAL oast_extract_tbl(t.line) d;
 ```
 
 ### Scalar Functions (JSON/Boolean Returns)
